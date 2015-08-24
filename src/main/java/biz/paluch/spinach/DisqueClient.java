@@ -1,21 +1,7 @@
 package biz.paluch.spinach;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.collect.ImmutableList.copyOf;
-
-import java.net.ConnectException;
-import java.net.SocketAddress;
-import java.util.Collection;
-import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
-
-import biz.paluch.spinach.api.DisqueConnection;
-import biz.paluch.spinach.impl.DisqueConnectionImpl;
-
 import com.google.common.base.Supplier;
+
 import com.lambdaworks.redis.AbstractRedisClient;
 import com.lambdaworks.redis.ClientOptions;
 import com.lambdaworks.redis.ConnectionBuilder;
@@ -29,13 +15,36 @@ import com.lambdaworks.redis.codec.Utf8StringCodec;
 import com.lambdaworks.redis.protocol.CommandHandler;
 import com.lambdaworks.redis.protocol.RedisCommand;
 
+import java.lang.management.ManagementFactory;
+import java.net.ConnectException;
+import java.net.SocketAddress;
+import java.util.Collection;
+import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
+
+import biz.paluch.spinach.api.DisqueConnection;
+import biz.paluch.spinach.impl.DisqueConnectionImpl;
+import biz.paluch.spinach.management.DisqueManagement;
+
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.copyOf;
+
 /**
  * A scalable thread-safe Disquelient. Multiple threads may share one connection if they avoid blocking operations.
  * 
  * @author <a href="mailto:mpaluch@paluch.biz">Mark Paluch</a>
  */
 public class DisqueClient extends AbstractRedisClient {
+
     private final DisqueURI disqueURI;
+
+    private boolean jmxEnabled = false;
 
     /**
      * Creates a uri-less DisqueClient. You can connect to different disque servers but you must supply a {@link DisqueURI} on
@@ -79,6 +88,13 @@ public class DisqueClient extends AbstractRedisClient {
         this.disqueURI = disqueURI;
         setDefaultTimeout(disqueURI.getTimeout(), disqueURI.getUnit());
         setOptions(new ClientOptions.Builder().build());
+    }
+
+    /**
+     * Enable JMX remote management.
+     */
+    public void enableJmx() {
+        jmxEnabled = true;
     }
 
     /**
@@ -184,6 +200,20 @@ public class DisqueClient extends AbstractRedisClient {
 
         if (!connected) {
             throw new RedisConnectionException("Cannot connect to Disque: " + disqueURI, causingException);
+        }
+
+        if (jmxEnabled) {
+
+            try {
+                MBeanServer beanServer = ManagementFactory.getPlatformMBeanServer();
+                ObjectName name = new ObjectName(DisqueManagement.MBeanObjectName);
+                if (!beanServer.isRegistered(name)) {
+                    beanServer.registerMBean(new DisqueManagement(connection), name);
+                }
+
+            } catch (Exception e) {
+
+            }
         }
 
         return connection;
